@@ -9,6 +9,7 @@ import com.banking.repository.BankTransactionRepository;
 import org.springframework.stereotype.Service;
 import com.banking.entity.Account;
 import com.banking.exception.ResourceNotFoundException;
+import com.banking.dto.TransferRequest;
 import java.math.BigDecimal;
 import com.banking.entity.BankTransaction;
 import java.time.LocalDateTime;
@@ -78,40 +79,40 @@ public class TransactionService {
 
     @Transactional
     public TransactionResponse withdraw(WithdrawalRequest request) {
-
-        // 1. Check duplicate Transaction ID
+        // Check duplicate transaction ID
         if (bankTransactionRepository.existsById(
                 request.getTransactionId())) {
+
             throw new DuplicateResourceException(
                     "Transaction ID already exists");
         }
 
-        // 2. Lock and fetch account
+        // Lock and fetch account
         Account account = accountRepository
                 .findByIdForUpdate(request.getAccountId())
                 .orElseThrow(() ->
                         new ResourceNotFoundException("Account not found"));
 
-        // 3. Check account status
+        //  Check account status
         if (!"ACTIVE".equals(account.getStatus())) {
             throw new IllegalStateException(
                     "Account is not active");
         }
 
-        // 4. Check sufficient balance
+        //  Check sufficient balance
         if (account.getBalance().compareTo(request.getAmount()) < 0) {
             throw new IllegalArgumentException(
                     "Insufficient balance");
         }
 
-        // 5. Deduct withdrawal amount
+        //  Deduct withdrawal amount
         BigDecimal updatedBalance = account.getBalance()
                 .subtract(request.getAmount());
 
         account.setBalance(updatedBalance);
         accountRepository.save(account);
 
-        // 6. Create transaction record
+        // Create transaction record
         BankTransaction transaction = new BankTransaction();
 
         transaction.setTransactionId(request.getTransactionId());
@@ -122,7 +123,7 @@ public class TransactionService {
 
         bankTransactionRepository.save(transaction);
 
-        // 7. Return response
+        //  Return response
         return new TransactionResponse(
                 transaction.getTransactionId(),
                 transaction.getType(),
@@ -130,6 +131,135 @@ public class TransactionService {
                 transaction.getStatus(),
                 account.getAccountId(),
                 null,
+                LocalDateTime.now()
+        );
+    }
+    @Transactional
+    public TransactionResponse transfer(TransferRequest request) {
+
+
+
+
+        // Check source and destination are different
+        if (request.getSourceAccountId().equals(
+                request.getDestinationAccountId())) {
+
+            throw new IllegalArgumentException(
+                    "Source and destination accounts cannot be same");
+        }
+
+        Account sourceAccount;
+        Account destinationAccount;
+
+        //  Lock accounts in ascending ID order
+        if (request.getSourceAccountId() <
+                request.getDestinationAccountId()) {
+
+            sourceAccount = accountRepository
+                    .findByIdForUpdate(request.getSourceAccountId())
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Source account not found"));
+
+            destinationAccount = accountRepository
+                    .findByIdForUpdate(request.getDestinationAccountId())
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Destination account not found"));
+
+        } else {
+
+            destinationAccount = accountRepository
+                    .findByIdForUpdate(request.getDestinationAccountId())
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Destination account not found"));
+
+            sourceAccount = accountRepository
+                    .findByIdForUpdate(request.getSourceAccountId())
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Source account not found"));
+        }
+        // Check if transaction ID already exists
+        var existingTransaction = bankTransactionRepository.findById(
+                request.getTransactionId()
+        );
+
+        if (existingTransaction.isPresent()) {
+
+            BankTransaction existing = existingTransaction.get();
+
+            boolean sameRequest =
+                    "TRANSFER".equals(existing.getType()) &&
+                            existing.getAmount().compareTo(request.getAmount()) == 0 &&
+                            existing.getSourceAccount().getAccountId()
+                                    .equals(request.getSourceAccountId()) &&
+                            existing.getDestinationAccount().getAccountId()
+                                    .equals(request.getDestinationAccountId());
+
+            if (sameRequest) {
+                return new TransactionResponse(
+                        existing.getTransactionId(),
+                        existing.getType(),
+                        existing.getAmount(),
+                        existing.getStatus(),
+                        existing.getSourceAccount().getAccountId(),
+                        existing.getDestinationAccount().getAccountId(),
+                        existing.getCreatedAt()
+                );
+            }
+
+            throw new DuplicateResourceException(
+                    "Transaction ID already exists with different details"
+            );
+        }
+
+        // 4. Check both accounts are ACTIVE
+        if (!"ACTIVE".equals(sourceAccount.getStatus()) ||
+                !"ACTIVE".equals(destinationAccount.getStatus())) {
+
+            throw new IllegalStateException(
+                    "Both accounts must be active");
+        }
+
+        // 5. Check sufficient balance
+        if (sourceAccount.getBalance().compareTo(
+                request.getAmount()) < 0) {
+
+            throw new IllegalArgumentException(
+                    "Insufficient balance");
+        }
+
+        // 6. Update both account balances
+        BigDecimal updatedSourceBalance =
+                sourceAccount.getBalance().subtract(request.getAmount());
+
+        BigDecimal updatedDestinationBalance =
+                destinationAccount.getBalance().add(request.getAmount());
+
+        sourceAccount.setBalance(updatedSourceBalance);
+        destinationAccount.setBalance(updatedDestinationBalance);
+
+        accountRepository.save(sourceAccount);
+        accountRepository.save(destinationAccount);
+
+        // 7. Create transaction record
+        BankTransaction transaction = new BankTransaction();
+
+        transaction.setTransactionId(request.getTransactionId());
+        transaction.setType("TRANSFER");
+        transaction.setAmount(request.getAmount());
+        transaction.setStatus("SUCCESS");
+        transaction.setSourceAccount(sourceAccount);
+        transaction.setDestinationAccount(destinationAccount);
+
+        bankTransactionRepository.save(transaction);
+
+        // 8. Return transaction response
+        return new TransactionResponse(
+                transaction.getTransactionId(),
+                transaction.getType(),
+                transaction.getAmount(),
+                transaction.getStatus(),
+                sourceAccount.getAccountId(),
+                destinationAccount.getAccountId(),
                 LocalDateTime.now()
         );
     }

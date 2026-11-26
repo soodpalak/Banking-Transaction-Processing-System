@@ -1,6 +1,6 @@
 
 package com.banking.controller;
-
+import com.banking.dto.TransferRequest;
 import com.banking.dto.DepositRequest;
 import com.banking.dto.TransactionResponse;
 import com.banking.service.TransactionService;
@@ -38,6 +38,17 @@ public class TransactionController {
 
         TransactionResponse response =
                 transactionService.withdraw(request);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(response);
+    }
+    @PostMapping("/transfer")
+    public ResponseEntity<TransactionResponse> transfer(
+            @Valid @RequestBody TransferRequest request) {
+
+        TransactionResponse response =
+                transactionService.transfer(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
